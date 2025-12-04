@@ -49,4 +49,17 @@ Alignment to Strategic Goals:
 • Increase velocity and delivery of configuration baselines
 • Reduce time and effort needed to remediate coverage gaps for security configuration for cloud service currently used in the MS production environment. The risk is currently covered under ISS_1068306
 • Allow for quicker expansion of security configuration baseline scope to include acquisitions (Etrade/Eaton Vance/PPA)
+
 Target Users:
+
+
+
+# Test EC2 resource deployment
+aws lambda invoke ^
+    --function-name ec2-resource-manager ^
+    --payload "{\"action\":\"deploy\",\"requirement\":{\"objective\":\"Access Control\",\"description\":\"Test IMDS v2\",\"configuration\":{\"MetadataOptions\":{\"HttpTokens\":\"required\",\"HttpEndpoint\":\"enabled\"}},\"priority\":\"HIGH\"},\"session_id\":\"test-12345\",\"service_name\":\"EC2\",\"requirement_index\":0}" ^
+    --cli-binary-format raw-in-base64-out ^
+    deploy_response.json
+
+# View the response
+type deploy_response.json

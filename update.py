@@ -69,18 +69,17 @@ def main():
     rationales = []
     tool_calls = []
     lambda_outputs = []
-    metadata_list = []
     final_response = ""
 
     # ------------------------------------------------------
-    # PROCESS STREAM EVENTS WITH BETTER PARSING
+    # PROCESS STREAM EVENTS WITH CORRECT PARSING
     # ------------------------------------------------------
     console.print("[yellow]📡 Processing agent response stream...[/yellow]\n")
     
     for event in response.get("completion", []):
         
         # Debug: Print event structure
-        # console.print(f"[dim]Event keys: {list(event.keys())}[/dim]")
+        console.print(f"[dim]Event keys: {list(event.keys())}[/dim]")
         
         # ----- Agent final response text -----
         if "chunk" in event:
@@ -94,7 +93,7 @@ def main():
                 except Exception as e:
                     console.print(f"[red]Failed to decode chunk: {e}[/red]")
 
-        # ----- Trace data (this is where the issue was) -----
+        # ----- Trace data (FIXED PARSING) -----
         elif "trace" in event:
             trace = event["trace"]
             
@@ -106,41 +105,70 @@ def main():
                 orch = trace["orchestrationTrace"]
                 console.print(f"[dim]Orchestration trace keys: {list(orch.keys())}[/dim]")
                 
-                # MODEL INPUT - Fixed structure
+                # MODEL INPUT - Direct access
                 if "modelInvocationInput" in orch:
                     model_inv_input = orch["modelInvocationInput"]
+                    console.print(f"[dim]ModelInvocationInput keys: {list(model_inv_input.keys())}[/dim]")
+                    
                     if "text" in model_inv_input:
                         model_input = model_inv_input["text"]
                         model_inputs.append(model_input)
                         console.print(f"[blue]🧠 Captured model input: {model_input[:100]}...[/blue]")
+                    else:
+                        console.print(f"[red]No 'text' field in modelInvocationInput: {model_inv_input}[/red]")
 
-                # MODEL OUTPUT - Fixed structure  
+                # MODEL OUTPUT - Direct access
                 if "modelInvocationOutput" in orch:
                     model_inv_output = orch["modelInvocationOutput"]
+                    console.print(f"[dim]ModelInvocationOutput keys: {list(model_inv_output.keys())}[/dim]")
+                    
                     if "rawResponse" in model_inv_output:
                         model_output = model_inv_output["rawResponse"]
                         model_outputs.append(model_output)
                         console.print(f"[cyan]📤 Captured model output: {model_output[:100]}...[/cyan]")
+                    else:
+                        console.print(f"[red]No 'rawResponse' field in modelInvocationOutput: {model_inv_output}[/red]")
 
-                # RATIONALE - Fixed structure
+                # RATIONALE - Direct access
                 if "rationale" in orch:
                     rat_data = orch["rationale"]
+                    console.print(f"[dim]Rationale keys: {list(rat_data.keys())}[/dim]")
+                    
                     if "text" in rat_data:
                         rationale = rat_data["text"]
                         rationales.append(rationale)
                         console.print(f"[yellow]🧐 Captured rationale: {rationale[:100]}...[/yellow]")
+                    else:
+                        console.print(f"[red]No 'text' field in rationale: {rat_data}[/red]")
 
-                # TOOL CALL INPUT - Fixed structure
-                if "actionGroupInvocationInput" in orch:
-                    tool_call_data = orch["actionGroupInvocationInput"]
-                    tool_calls.append(tool_call_data)
-                    console.print(f"[magenta]🛠 Captured tool call[/magenta]")
+                # TOOL CALL INPUT - From invocationInput
+                if "invocationInput" in orch:
+                    invocation_input = orch["invocationInput"]
+                    console.print(f"[dim]InvocationInput keys: {list(invocation_input.keys())}[/dim]")
+                    
+                    if "actionGroupInvocationInput" in invocation_input:
+                        tool_call_data = invocation_input["actionGroupInvocationInput"]
+                        tool_calls.append(tool_call_data)
+                        console.print(f"[magenta]🛠 Captured tool call: {tool_call_data.get('function', 'unknown')}[/magenta]")
 
-                # LAMBDA OUTPUT - Fixed structure
-                if "actionGroupInvocationOutput" in orch:
-                    lambda_out_data = orch["actionGroupInvocationOutput"]
-                    lambda_outputs.append(lambda_out_data)
-                    console.print(f"[green]📥 Captured lambda output[/green]")
+                # LAMBDA OUTPUT - From observation
+                if "observation" in orch:
+                    observation = orch["observation"]
+                    console.print(f"[dim]Observation keys: {list(observation.keys())}[/dim]")
+                    
+                    if "actionGroupInvocationOutput" in observation:
+                        lambda_out_data = observation["actionGroupInvocationOutput"]
+                        lambda_outputs.append(lambda_out_data)
+                        console.print(f"[green]📥 Captured lambda output[/green]")
+                    
+                    # FINAL RESPONSE - From observation
+                    if "finalResponse" in observation:
+                        final_resp = observation["finalResponse"]
+                        if isinstance(final_resp, str):
+                            final_response += final_resp
+                        else:
+                            final_response += str(final_resp)
+                        console.print(f"[bright_green]✅ Captured final response[/bright_green]")
 
     console.print("\n[yellow]✅ Stream processing complete[/yellow]\n")
 
@@ -173,7 +201,7 @@ def main():
     # TOOL CALL DETAILS
     if tool_calls:
         for i, tool_call in enumerate(tool_calls, 1):
-            table = Table(title=f"Lambda Tool Call #{i}", show_header=True, header_style="bold magenta")
+            table = Table(title=f"🛠 Lambda Tool Call #{i}", show_header=True, header_style="bold magenta")
             table.add_column("Field", style="cyan")
             table.add_column("Value", style="white")
 
@@ -194,7 +222,7 @@ def main():
             table.add_row("Parameters", params_str)
             console.print(table)
     else:
-        console.print("[dim]No tool calls captured[/dim]")
+        console.print("[dim]🛠 No tool calls captured[/dim]")
 
     # LAMBDA OUTPUTS
     if lambda_outputs:
@@ -203,15 +231,29 @@ def main():
             if not output_text:
                 output_text = str(lambda_out)
             
+            # Show metadata if available
+            metadata = lambda_out.get("metadata", {})
+            
             try:
                 # Try to format as JSON if possible
                 parsed = json.loads(output_text)
                 syntax = Syntax(json.dumps(parsed, indent=2), "json", theme="monokai", line_numbers=False)
-                pretty_panel(f"🛠 LAMBDA RESPONSE #{i}", syntax, style="green")
+                pretty_panel(f"📥 LAMBDA RESPONSE #{i}", syntax, style="green")
             except:
-                pretty_panel(f"🛠 LAMBDA RESPONSE #{i}", output_text, style="green")
+                pretty_panel(f"📥 LAMBDA RESPONSE #{i}", output_text, style="green")
+            
+            # Show metadata in a table
+            if metadata:
+                meta_table = Table(title=f"Metadata for Response #{i}", show_header=True)
+                meta_table.add_column("Field", style="cyan")
+                meta_table.add_column("Value", style="white")
+                
+                for key, value in metadata.items():
+                    meta_table.add_row(str(key), str(value))
+                
+                console.print(meta_table)
     else:
-        console.print("[dim]No lambda outputs captured[/dim]")
+        console.print("[dim]📥 No lambda outputs captured[/dim]")
 
     # FINAL AGENT RESPONSE
     if final_response:
